@@ -115,24 +115,25 @@ EXPORT_SYMBOL(devfreq_get_freq_level);
  */
 static int devfreq_update_status(struct devfreq *devfreq, unsigned long freq)
 {
-	int lev, prev_lev;
+	int lev, prev_lev, ret = 0;
 	unsigned long cur_time;
 
-	lev = devfreq_get_freq_level(devfreq, freq);
-	if (lev < 0)
-		return lev;
-
 	cur_time = jiffies;
-	devfreq->time_in_state[lev] +=
-			 cur_time - devfreq->last_stat_updated;
-	devfreq->last_stat_updated = cur_time;
-
-	if (freq == devfreq->previous_freq)
-		return 0;
 
 	prev_lev = devfreq_get_freq_level(devfreq, devfreq->previous_freq);
-	if (prev_lev < 0)
-		return 0;
+	if (prev_lev < 0) {
+		ret = prev_lev;
+		goto out;
+	}
+
+	devfreq->time_in_state[prev_lev] +=
+			 cur_time - devfreq->last_stat_updated;
+
+	lev = devfreq_get_freq_level(devfreq, freq);
+	if (lev < 0) {
+		ret = lev;
+		goto out;
+	}
 
 	if (lev != prev_lev) {
 		devfreq->trans_table[(prev_lev *
@@ -140,7 +141,9 @@ static int devfreq_update_status(struct devfreq *devfreq, unsigned long freq)
 		devfreq->total_trans++;
 	}
 
-	return 0;
+out:
+	devfreq->last_stat_updated = cur_time;
+	return ret;
 }
 
 /**
@@ -215,10 +218,8 @@ int update_devfreq(struct devfreq *devfreq)
 	}
 
 	err = devfreq->profile->target(devfreq->dev.parent, &freq, flags);
-#ifndef CONFIG_LGE_DEVFREQ_DFPS
 	if (err)
 		return err;
-#endif
 
 	if (devfreq->profile->freq_table)
 		if (devfreq_update_status(devfreq, freq))
@@ -243,10 +244,9 @@ static void devfreq_monitor(struct work_struct *work)
 
 	mutex_lock(&devfreq->lock);
 	err = update_devfreq(devfreq);
-#ifndef CONFIG_LGE_DEVFREQ_DFPS
 	if (err)
 		dev_err(&devfreq->dev, "dvfs failed with (%d) error\n", err);
-#endif
+
 	queue_delayed_work(devfreq_wq, &devfreq->work,
 				msecs_to_jiffies(devfreq->profile->polling_ms));
 	mutex_unlock(&devfreq->lock);
@@ -556,14 +556,9 @@ struct devfreq *devfreq_add_device(struct device *dev,
 	governor = find_devfreq_governor(devfreq->governor_name);
 	if (!IS_ERR(governor))
 		devfreq->governor = governor;
-	if (devfreq->governor){
-#ifdef CONFIG_LGE_DEVFREQ_DFPS
-		if (governor->init)
-			err = governor->init(devfreq);
-#endif
+	if (devfreq->governor)
 		err = devfreq->governor->event_handler(devfreq,
 					DEVFREQ_GOV_START, NULL);
-	}
 	mutex_unlock(&devfreq_list_lock);
 	if (err) {
 		dev_err(dev, "%s: Unable to start governor for the device\n",
@@ -839,48 +834,6 @@ static ssize_t show_freq(struct device *dev,
 	return sprintf(buf, "%lu\n", devfreq->previous_freq);
 }
 
-#ifdef CONFIG_LGE_DEVFREQ_DFPS
-static ssize_t store_freq(struct device *dev,
-			 struct device_attribute *attr, const char *buf, size_t count)
-{
-	struct devfreq *df = to_devfreq(dev);
-	unsigned long value;
-	u32 flags = 0;
-	int ret;
-
-	ret = sscanf(buf, "%lu", &value);
-	if (ret != 1)
-		return -EINVAL;
-
-	if(!df) {
-		dev_err(dev,"Can't find devfreq device.\n");
-		return -ENODEV;
-	}
-	mutex_lock(&df->lock);
-
-	if (df->min_freq && value < df->min_freq) {
-		value = df->min_freq;
-		flags &= ~DEVFREQ_FLAG_LEAST_UPPER_BOUND; /* Use GLB */
-	}
-	if (df->max_freq && value > df->max_freq) {
-		value = df->max_freq;
-		flags |= DEVFREQ_FLAG_LEAST_UPPER_BOUND; /* Use LUB */
-	}
-
-	df->profile->target(df->dev.parent, &value, flags);
-	if (df->profile->freq_table)
-		if (devfreq_update_status(df, value))
-			dev_err(&df->dev,
-				"Couldn't update frequency transition information.\n");
-
-	df->previous_freq = value;
-	ret = count;
-
-	mutex_unlock(&df->lock);
-	return ret;
-}
-#endif
-
 static ssize_t show_target_freq(struct device *dev,
 			struct device_attribute *attr, char *buf)
 {
@@ -1055,11 +1008,7 @@ static ssize_t show_trans_table(struct device *dev, struct device_attribute *att
 static struct device_attribute devfreq_attrs[] = {
 	__ATTR(governor, S_IRUGO | S_IWUSR, show_governor, store_governor),
 	__ATTR(available_governors, S_IRUGO, show_available_governors, NULL),
-#ifdef CONFIG_LGE_DEVFREQ_DFPS
-	__ATTR(cur_freq, S_IRUGO | S_IWUSR, show_freq, store_freq),
-#else
 	__ATTR(cur_freq, S_IRUGO, show_freq, NULL),
-#endif
 	__ATTR(available_frequencies, S_IRUGO, show_available_freqs, NULL),
 	__ATTR(target_freq, S_IRUGO, show_target_freq, NULL),
 	__ATTR(polling_interval, S_IRUGO | S_IWUSR, show_polling_interval,
@@ -1078,7 +1027,10 @@ static int __init devfreq_init(void)
 		return PTR_ERR(devfreq_class);
 	}
 
-	devfreq_wq = create_freezable_workqueue("devfreq_wq");
+	devfreq_wq =
+	    alloc_workqueue("devfreq_wq",
+			    WQ_HIGHPRI | WQ_UNBOUND | WQ_FREEZABLE |
+			    WQ_MEM_RECLAIM, 0);
 	if (IS_ERR(devfreq_wq)) {
 		class_destroy(devfreq_class);
 		pr_err("%s: couldn't create workqueue\n", __FILE__);

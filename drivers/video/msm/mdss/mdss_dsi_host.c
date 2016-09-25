@@ -1457,15 +1457,6 @@ static int dsi_event_thread(void *data)
 	struct sched_param param;
 	u32 todo = 0;
 	int ret;
-#ifdef CONFIG_LGE_DEVFREQ_DFPS
-	struct mdss_dsi_ctrl_pdata *mctrl = NULL;
-
-	if (mdss_dsi_broadcast_mode_enabled()) {
-		mctrl = mdss_dsi_get_master_ctrl();
-		if (!mctrl)
-			pr_err("%s: unable to get master control\n", __func__);
-	}
-#endif
 	param.sched_priority = 16;
 	ret = sched_setscheduler_nocheck(current, SCHED_FIFO, &param);
 	if (ret)
@@ -1502,17 +1493,9 @@ static int dsi_event_thread(void *data)
 			mutex_unlock(&ctrl->mutex);
 		}
 
-#ifdef CONFIG_LGE_DEVFREQ_DFPS
-		if (todo & DSI_EV_DSI_FIFO_EMPTY) {
-			mdss_dsi_sw_reset_restore(ctrl);
-			if (mctrl)
-				mdss_dsi_sw_reset_restore(mctrl);
-		}
-#else
 		if (todo & DSI_EV_DSI_FIFO_EMPTY)
 			mdss_dsi_sw_reset_restore(ctrl);
 
-#endif
 		if (todo & DSI_EV_MDP_BUSY_RELEASE) {
 			spin_lock_irqsave(&ctrl->mdp_lock, flag);
 			ctrl->mdp_busy = false;

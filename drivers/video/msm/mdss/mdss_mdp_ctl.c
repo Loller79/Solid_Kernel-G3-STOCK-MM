@@ -2599,17 +2599,11 @@ int mdss_mdp_ctl_update_fps(struct mdss_mdp_ctl *ctl, int fps)
 	int ret = 0;
 	struct mdss_mdp_ctl *sctl = NULL;
 
-#ifdef CONFIG_LGE_DEVFREQ_DFPS
-	pr_debug("%s + : trying to fps = %d\n", __func__, fps);
-#endif
 	sctl = mdss_mdp_get_split_ctl(ctl);
 
 	if (ctl->config_fps_fnc)
 		ret = ctl->config_fps_fnc(ctl, sctl, fps);
 
-#ifdef CONFIG_LGE_DEVFREQ_DFPS
-	pr_debug("%s - : fps = %d\n", __func__, fps);
-#endif
 	return ret;
 }
 
