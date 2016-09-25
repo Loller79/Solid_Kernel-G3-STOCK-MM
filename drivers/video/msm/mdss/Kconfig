@@ -63,3 +63,11 @@ config T1_TOVIS_NT51021_WUXGA_VIDEO_PANEL
 config LGE_READER_MODE
 	bool "LGE reader mode"
 	default n
+
+config FB_MSM_MDSS_KCAL_CTRL
+	depends on FB_MSM_MDSS
+	bool "MDSS color control"
+	default y
+	---help---
+	  Enable sysfs for post-processing control of mdss-mdp5 display
+	  controllers in MDSS.
