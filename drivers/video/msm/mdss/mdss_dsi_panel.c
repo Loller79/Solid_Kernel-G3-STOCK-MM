@@ -114,7 +114,7 @@ extern int reg_num;
 int cmd_num;
 #endif
 
-#define MIN_REFRESH_RATE 30
+#define MIN_REFRESH_RATE 60
 
 DEFINE_LED_TRIGGER(bl_led_trigger);
 #if defined(CONFIG_MACH_LGE_BACKLIGHT_SUPPORT)
